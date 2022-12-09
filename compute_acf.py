@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 
 use_log = True
 show_image = False
-do_spatial = True
+do_spatial = False
 do_temporal = True
 begDate = dt.datetime(2022,4,15)
 endDate = dt.datetime(2022,7,15)
@@ -54,7 +54,7 @@ days_sampled = end_day - beg_day
 
 spores /= days_sampled
 if use_log:
-    spores = np.log(spores+1)
+    spores = np.log10(spores+1)
 
 #spores = (spores > 0).astype(np.float)
 
@@ -81,6 +81,48 @@ x2 = (np.square(spores-Mean) * np.ones((1,N))).flatten()
 y2 = (np.ones((N,1)) * np.square(spores.T - Mean)).flatten()
 x = (spores * np.ones((1,N))).flatten()
 y = (np.ones((N,1)) * spores.T).flatten()
+
+
+if 0:
+    un_sens_id, firstInd, inds3 = np.unique(sensor_id, return_inverse=True, return_index=True)
+    start_dates = np.zeros(un_sens_id.size)
+    
+
+    for i in range(un_sens_id.size):        
+        inds = np.where(inds3==i)[0]
+        # determine a start date...
+        t = center_date[inds,0]
+        yy = (spores[inds,0] > 0).astype(np.float)
+        sortInds = np.argsort(t)
+        Errors = np.cumsum(yy[sortInds]) + np.cumsum(1 - yy[sortInds[::-1]])[::-1]
+        bestInd = np.argmin(Errors)
+        
+        start_dates[i] = t[sortInds[bestInd]]
+
+        bestInd = np.min(np.where(yy[sortInds]>0)[0])
+        start_dates[i] = t[sortInds[bestInd]]
+        
+        if 1:
+            fig, axes = plt.subplots()
+            plt.plot(center_date[inds], spores[inds])
+            plt.plot(t[sortInds[bestInd]],0.5,'rx')
+            plt.show()
+            d = 1
+
+
+    #plt.plot(start_dates)
+
+    fig, axes = plt.subplots(3,1)
+    axes[0].plot(Long[firstInd,0],start_dates,'x')
+    axes[1].plot(Lat[firstInd,0],start_dates,'x')
+
+    rel_date = (start_dates - start_dates.min()) / (start_dates.max() - start_dates.min())
+    axes[2].scatter(Long[firstInd,0],Lat[firstInd,0],c=rel_date,s=35,cmap='gray')
+    axes[2].set_xlim(left=-122.56,right=-122.3)
+    axes[2].set_ylim(bottom=38.1, top=38.7)
+    plt.show()
+
+
 
 if show_image:
     # Get overview over data first...
@@ -119,19 +161,19 @@ if 0:
 
 if do_spatial:
     # Do the spaial ACF
-    spatial_pairs = np.where(((sensor_id != sensor_id.T) * (time_overlap > 0.) * 
+    spatial_pairs = np.where(((sensor_id != sensor_id.T) * (time_overlap > 0.5) * 
         (center_date > date_to_day(begDate)) * (center_date < date_to_day(endDate))).flatten())[0]
-    doEqualBinSizes = True
+    doEqualBinSizes = False
     useKernel = True
     if useKernel:
-        # Using a Gaussian kernel for each distance
-        
+        # Using a Gaussian kernel for each distance        
         sigma_meters = 5
+        sigma_percentage = 0.25
         resolution_meters = 10
-        max_dist = 1000
+        max_dist = 2000
 
         spatial_pairs = spatial_pairs[DistMat[spatial_pairs] < max_dist]
-        Bins = np.arange(resolution_meters/2,max_dist,resolution_meters)
+        Bins = np.arange(resolution_meters,max_dist,resolution_meters)
         M = Bins.size
         xAll = np.zeros(M)
         yAll = np.zeros(M)
@@ -140,20 +182,21 @@ if do_spatial:
         xyAll = np.zeros(M)
         nAll = np.zeros(M)
         for i in spatial_pairs:
-            Profile = stats.norm.pdf(Bins, DistMat[i] , sigma_meters)
+            Profile = stats.norm.pdf(Bins, DistMat[i] , max(sigma_meters,sigma_percentage*DistMat[i]))
             Profile = Profile / np.sum(Profile)
             xAll += Profile * x[i]
             yAll += Profile * y[i]
             nAll += Profile
 
-        Mean = 0.5 * (xAll + yAll) / nAll
+        xMean = xAll / nAll
+        yMean = yAll / nAll
 
         for i in spatial_pairs:
-            Profile = stats.norm.pdf(Bins, DistMat[i] , sigma_meters)
+            Profile = stats.norm.pdf(Bins, DistMat[i], max(sigma_meters,sigma_percentage*DistMat[i]))
             Profile = Profile / np.sum(Profile)            
-            x2All += Profile * np.square(x[i] - Mean)
-            y2All += Profile * np.square(y[i] - Mean)
-            xyAll += Profile * (x[i] - Mean) * (y[i] - Mean)            
+            x2All += Profile * np.square(x[i] - xMean)
+            y2All += Profile * np.square(y[i] - yMean)
+            xyAll += Profile * (x[i] - xMean) * (y[i] - yMean)            
 
         x2All /= nAll
         y2All /= nAll
@@ -191,21 +234,28 @@ if do_spatial:
             inds2 = spatial_pairs[np.where(inds == i)[0]]
             xAll = np.append(x[inds2], y[inds2])
             Mean = xAll.mean()
-
             #ACF_dist[i] = np.sum(xy[inds2]) / np.sqrt(np.sum(x2[inds2])*np.sum(y2[inds2]))
-            ACF_dist[i] = np.mean((x[inds2]-Mean)*(y[inds2]-Mean)) / np.mean(np.square(xAll - Mean))
+            ACF_dist[i] = np.mean((x[inds2]-Mean)*(y[inds2]-Mean)) / np.var(xAll)
             Ndatapts[i] = inds2.size
 
     fig, ax = plt.subplots()
-    plt.plot(un_dists, ACF_dist)
-    if useKernel or not doEqualBinSizes:
+    plt.plot(un_dists, ACF_dist, label='ACF')
+    if 0*useKernel or not doEqualBinSizes:
         ax2 = ax.twinx()
         plt.plot(un_dists, Ndatapts,'r')
-    ax.set_xlim(left=0,right=1000)# if use_log else 50)
+        ax2.set_ylabel(f'# sensor pairs at this distance')
+        ax.plot(np.zeros(0),np.zeros(0),'r',label="#data points")
+    ax.set_xlim(left=0,right=2000)# if use_log else 50)
     ax.set_ylim(bottom=0)
-    #ax.set_xlabel('#Days apart for measurements on the same sensor')
-    #ax.set_ylabel(f'Auto correlation {"log([spore count] + 1)" if use_log else "spore count"}')
+    ax.set_xlabel('Distance between sensors [m]')
+    ax.set_ylabel(f'Auto correlation {"log10[spore_count + 1]" if use_log else "spore_count"}')
+    ax.legend()
     plt.show()
+
+    #https://physics.stackexchange.com/questions/120093/random-particles-on-a-grid-effect-of-increasing-density-on-distance-between-the
+    #d = 2*np.sqrt(A/(np.pi*N))
+    # setting N = 1
+    # d = 2*np.sqrt(A/(np.pi)) if A = 1acre, then d = 2*np.sqrt(43560*0.305**2/(np.pi)) = 72 meters
 
 if do_temporal:
     # do the temporal ACF 
@@ -219,8 +269,9 @@ if do_temporal:
             for i in range(M):
                 inds = same_sensor[(i>=min_day_offset[same_sensor])*(i<=max_day_offset[same_sensor])]
                 xAll = np.append(x[inds], y[inds])
-                Mean = xAll.mean()
-                ACF_time[i] = np.mean((x[inds]-Mean)*(y[inds]-Mean)) / np.mean(np.square(xAll - Mean))
+                xMean = x[inds].mean()
+                yMean = y[inds].mean()
+                ACF_time[i] = np.mean((x[inds]-x[inds].mean())*(y[inds]-y[inds].mean())) / np.sqrt(np.var(x[inds]) * np.var(y[inds]))
                 Ndatapts[i] = inds.size
         else:
             xy_sum = np.zeros(M)
@@ -257,7 +308,7 @@ if do_temporal:
     ax.set_xlim(left=0,right=150 if use_log else 50)
     #ax.set_ylim(bottom=0)
     ax.set_xlabel('#Days apart for measurements on the same sensor')
-    ax.set_ylabel(f'Auto correlation {"log([spore count] + 1)" if use_log else "spore count"}')
+    ax.set_ylabel(f'Auto correlation {"log10[spore_count] + 1]" if use_log else "spore_count"}')
     plt.show()
 d = 1
 
