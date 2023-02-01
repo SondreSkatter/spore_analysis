@@ -6,12 +6,15 @@ from matplotlib import pyplot as plt
 
 use_log = True
 show_image = False
-do_spatial = False
-do_temporal = True
-begDate = dt.datetime(2022,4,15)
-endDate = dt.datetime(2022,7,15)
-begDate = dt.datetime(2021,4,20)
-endDate = dt.datetime(2023,6,10)
+do_spatial = True
+do_temporal = False
+filter_dates = True
+if filter_dates:
+    begDate = dt.datetime(2022,4,15)
+    endDate = dt.datetime(2022,7,15)
+else:
+    begDate = dt.datetime(2021,4,20)
+    endDate = dt.datetime(2023,6,10)
 
 def calculate_spherical_distance(lat1, lon1, lat2, lon2, r=6371000):
     # Convert degrees to radians
@@ -163,8 +166,8 @@ if do_spatial:
     # Do the spaial ACF
     spatial_pairs = np.where(((sensor_id != sensor_id.T) * (time_overlap > 0.5) * 
         (center_date > date_to_day(begDate)) * (center_date < date_to_day(endDate))).flatten())[0]
-    doEqualBinSizes = False
-    useKernel = True
+    doEqualBinSizes = True
+    useKernel = False
     if useKernel:
         # Using a Gaussian kernel for each distance        
         sigma_meters = 5
@@ -209,7 +212,7 @@ if do_spatial:
     elif doEqualBinSizes:
         # do equal number of points in each bin
         sortInd = np.argsort(DistMat[spatial_pairs])
-        M = 200 # num points per bin
+        M = 1000 # num points per bin
         numBins = int(sortInd.size / M)
         ACF_dist = np.zeros(numBins)
         un_dists = np.zeros(numBins)
